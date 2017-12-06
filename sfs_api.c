@@ -520,7 +520,38 @@ int sfs_fread(int fileID, char *buf, int length)
 	return length;
 
 }
+int max( int num1, int num2 )
+{
+	return ( num1 > num2 ) ? num1 : num2; 
+}
+
 int sfs_fwrite( int fileID, const char* buf, int length )
+{
+	int const in_idx 	= fd_table[ fileID ].inodeIndex;
+	int const rwptr 	= fd_table[ fileID ].rwptr;
+
+	if ( in_idx < 1 ) //Cannot write to root
+	{
+		return -1; //Invalid fd
+	}
+
+	inode_t intemp = in_table[ in_idx ];
+
+	int rwptr_block				= (int)ceil( (float)rwptr / (float)BLOCK_SIZE ) * BLOCK_SIZE; 	//Position of the end of the rwptr's block in bytes
+	int len_from_rwptr_block	= length - ( rwptr_block - rwptr );								//Length from the end of the rwptr's block
+	int size_block 				= (int)ceil( (float)intemp.size / (float)BLOCK_SIZE ) * BLOCK_SIZE; 	//Position of the end of the size's block in bytes
+
+	int size_inc 				= max( 0, rwptr - intemp.size + length );						//Total Size increase
+	int size_inc_from_block		= max( 0, rwptr_block - size_block + len_from_rwptr_block );	//Relevant size increase
+	int num_new_blocks			= (int)ceil( (float)size_inc_from_block / (float)BLOCK_SIZE );			//Number of new blocks
+
+	printf("Number of new_blocks of write of %d bytes from rwptr %d: %d \n", length, rwptr, num_new_blocks);
+
+	in_table[ fd_table[ fileID ].inodeIndex ].size 	+= size_inc;
+	fd_table[ fileID ].rwptr 						+= length;
+}
+
+int sfs_fwrite_old( int fileID, const char* buf, int length )
 {
 	int const inode_index 	= fd_table[ fileID ].inodeIndex;
 
@@ -866,8 +897,24 @@ void sfs_test_milan()
 		buff[i] = ( char )255;
 	} 
 
-	sfs_fwrite( file1, buff, 24*1024 );
+	sfs_fwrite( file1, buff, 512 );
+	sfs_fwrite( file1, buff, 256 );
+	sfs_fwrite( file1, buff, 256 );
+	sfs_fwrite( file1, buff, 1024 );
+	sfs_fwrite( file1, buff, 1024*12 );
+	sfs_fseek( file1, 0 );
+	printf("Seek file %d to loc %d\n", file1, 0 );
+	sfs_fwrite( file1, buff, 512 );
+	sfs_fwrite( file1, buff, 256 );
+	sfs_fwrite( file1, buff, 256 );
+	sfs_fwrite( file1, buff, 1024 );
+	sfs_fwrite( file1, buff, 1024*11.5f );
+	sfs_fwrite( file1, buff, 1024 );
+	sfs_fwrite( file1, buff, 1024 );
+	sfs_fwrite( file1, buff, 1024 );
+	sfs_fwrite( file1, buff, 1024 );
 
+/*
 	int idxBlock[1024/4];
 	read_blocks( ( *fd_table[ file1 ].inode ).indirectPointer, 1, idxBlock );
 
@@ -884,5 +931,7 @@ void sfs_test_milan()
 	sfs_fread( file1, buff, 1024*24 );
 
 	printf("\n" );
+*/
+
 }
 
