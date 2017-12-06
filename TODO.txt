@@ -1,0 +1,10 @@
+TODO:
+mksfs				|✓
+sfs_getnextfilename |✓
+sfs_getfilesize		|✓
+sfs_fopen			|✓
+sfs_fclose			|✓
+sfs_fread			|✓
+sfs_fwrite			|✓
+sfs_fseek			|✓
+sfs_remove			|
