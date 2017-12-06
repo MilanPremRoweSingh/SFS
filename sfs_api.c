@@ -525,6 +525,89 @@ int max( int num1, int num2 )
 	return ( num1 > num2 ) ? num1 : num2; 
 }
 
+int alloc_new_blocks ( int in_idx, int new_blocks )
+{
+	if ( new_blocks == 0 )
+	{
+		return 0;
+	} 
+	else if ( new_blocks < 0 )
+	{
+		printf("Nonpositive new_blocks");
+		return -1;
+	}
+	inode_t intemp = in_table[ in_idx ];
+
+	int const max_blocks 	= ( 12 + ( BLOCK_SIZE / 4 ) ); 											// #data_ptrs + BLOCK_SIZE/sizeof(int)
+	int const size_block	= (int)ceil( (float)intemp.size / (float)BLOCK_SIZE );				 	//Position of the end of the size's block in bytes
+	int first_block 		= size_block;
+	int last_block 			= size_block + new_blocks;
+
+	int blocks_allocated = 0;
+
+	if ( size_block + new_blocks > max_blocks )
+	{
+		printf( "Trying to allocate too many blocks.\n" );
+		return -1;
+	}
+
+	if ( size_block < 12 && last_block > 12 ) // Need to create index block
+	{
+		int new_idx = get_index();
+		if ( new_idx == -1 )
+		{
+			printf("No remaining space on disc\n");
+			return -1;
+		}
+		int idxBlock[ BLOCK_SIZE / 4 ];
+		for ( int i = 0; i < BLOCK_SIZE / 4; i++ )
+		{
+			idxBlock[ i ] = -1;
+		} 
+		write_blocks( new_idx, 1, (void*)idxBlock);
+		intemp.indirectPointer = new_idx;
+	}
+
+	int* new_indices = (int*)malloc( sizeof( int ) * new_blocks); 
+	for ( int i = 0; i < new_blocks; i++ )
+	{
+		int new_idx = get_index();
+		if ( new_idx == -1 )
+		{
+			printf("No remaining space on disc\n");
+			for ( int j = i-1; j >= 0; j-- )
+			{
+				rm_index( new_indices[ j ] );
+			}
+			free(new_indices);
+			return -1;
+		}
+		new_indices[ i ] = new_idx;
+
+	}
+
+	for ( int i = first_block; i < last_block; i++ )
+	{
+		if ( i < 12 )
+		{
+			intemp.data_ptrs[ i ] = new_indices[ blocks_allocated ];
+			blocks_allocated++;
+		} 
+		else 
+		{
+			int idxBlock[ BLOCK_SIZE / 4 ];
+			read_blocks( intemp.indirectPointer, 1, (void*)idxBlock);
+			idxBlock[ i - 12 ] = new_indices[ blocks_allocated ];
+			write_blocks( intemp.indirectPointer, 1, (void*)idxBlock);
+			blocks_allocated++;
+		}
+	}
+
+	in_table[ in_idx ] = intemp;
+	free(new_indices);
+	return blocks_allocated;
+}
+
 int sfs_fwrite( int fileID, const char* buf, int length )
 {
 	int const in_idx 	= fd_table[ fileID ].inodeIndex;
@@ -546,6 +629,11 @@ int sfs_fwrite( int fileID, const char* buf, int length )
 	int num_new_blocks			= (int)ceil( (float)size_inc_from_block / (float)BLOCK_SIZE );			//Number of new blocks
 
 	printf("Number of new_blocks of write of %d bytes from rwptr %d: %d \n", length, rwptr, num_new_blocks);
+
+	if ( alloc_new_blocks( in_idx, num_new_blocks ) == -1 )
+	{
+		return -1;
+	}
 
 	in_table[ fd_table[ fileID ].inodeIndex ].size 	+= size_inc;
 	fd_table[ fileID ].rwptr 						+= length;
@@ -854,7 +942,7 @@ int sfs_remove(char *file)
 		if ( inode.indirectPointer != -1 )
 		{
 			int idxBlock[1024/4];							//|
-			read( inode.indirectPointer, 1, idxBlock );		//|
+			read_blocks( inode.indirectPointer, 1, idxBlock );		//|
 			for ( int i = 0; i < 1024 / 4; i++ )
 			{
 				if ( idxBlock[ i ] != -1 )
@@ -886,6 +974,26 @@ int sfs_remove(char *file)
 	}
 }
 
+void test_print_block_indices( int in_idx, int num_blocks )
+{
+	printf("in_table[i] data ptrs:\n");
+	inode_t intemp = in_table[ in_idx ];
+	for ( int i = 0; i < num_blocks; i++ )
+	{
+		if ( i < 12 )
+		{
+			printf( " %d", intemp.data_ptrs[ i ] );
+		} 
+		else 
+		{
+			int idxBlock[ BLOCK_SIZE / 4 ];
+			read_blocks( intemp.indirectPointer, 1, (void*)idxBlock);
+			printf( ", %d", idxBlock[ i - 12 ]  );
+		}
+	}
+	printf("\n");
+}
+
 void sfs_test_milan()
 {
 	mksfs(1); 
@@ -897,22 +1005,67 @@ void sfs_test_milan()
 		buff[i] = ( char )255;
 	} 
 
+	int num_blocks = 0;
+
 	sfs_fwrite( file1, buff, 512 );
+	num_blocks += 1;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fwrite( file1, buff, 256 );
+	num_blocks += 0;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fwrite( file1, buff, 256 );
+	num_blocks += 0;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fwrite( file1, buff, 1024 );
+	num_blocks += 1;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fwrite( file1, buff, 1024*12 );
+	num_blocks += 12;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fseek( file1, 0 );
 	printf("Seek file %d to loc %d\n", file1, 0 );
+
 	sfs_fwrite( file1, buff, 512 );
+	num_blocks += 0;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fwrite( file1, buff, 256 );
+	num_blocks += 0;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fwrite( file1, buff, 256 );
+	num_blocks += 0;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fwrite( file1, buff, 1024 );
+	num_blocks += 0;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fwrite( file1, buff, 1024*11.5f );
+	num_blocks += 0;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fwrite( file1, buff, 1024 );
+	num_blocks += 1;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fwrite( file1, buff, 1024 );
+	num_blocks += 1;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fwrite( file1, buff, 1024 );
+	num_blocks += 1;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 	sfs_fwrite( file1, buff, 1024 );
+	num_blocks += 1;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+
 
 /*
 	int idxBlock[1024/4];
