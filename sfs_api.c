@@ -402,6 +402,136 @@ int sfs_fopen(char *name)
 
 				strcpy( rootDir[ dir_index ].name, name );
 
+				file_index = dir_index; 
+				// CREATE FILE - END /////////////////////////
+			}
+		}
+	}
+	// IF FILE DOESNT EXIST - END ////////////////////////////////////////////
+
+	// IF FILE EXISTS - START //////////////////////////////////////////
+	if ( file_index > 0 ) // NOT >= because of root dir, cant open root dir as file
+	{	
+		int file_not_opened = 1;
+		for ( int i = 0; i < NO_OF_INODES; i++ )
+		{
+			if ( fd_table[i].inodeIndex == rootDir[file_index].num && fd_table[i].inodeIndex != -1 )
+			{
+				file_not_opened = 0;
+			}
+		}
+
+		if ( file_not_opened == 1 )
+		{
+			for ( int i = 0; i < NO_OF_INODES; i++ )
+			{
+				if ( fd_table[ i ].inodeIndex == -1 )
+				{
+					fd_table[ i ].inodeIndex 	= rootDir[ file_index ].num;
+					fd_table[ i ].inode 		= &in_table[ rootDir[ file_index ].num ];
+					fd_table[ i ].rwptr			= in_table[ rootDir[ file_index ].num ].size; //size will refer to the last byte in the data, so it is the end of the file
+					file_index 					= i;
+					break;
+				}
+			}
+		}
+	}
+	// IF FILE EXISTS - END ////////////////////////////////////////////
+
+
+	flush_in_table_to_disc();
+	flush_rootDir_to_disc();
+
+	return file_index;
+}
+int sfs_fopen_old(char *name)
+{
+	// VERIFY NAME FORMAT - START /////////////////
+	char* dotptr 		= strstr( name, "." );
+	int name_length 	= ( dotptr ) ?  dotptr - name : strlen( name );
+	int exts_length 	= ( dotptr ) ? strlen( name ) - name_length - 1 : 0;
+	if ( name_length > 16 )
+	{
+		printf("sfs_fopen: file name too long\n");
+		return -1;
+	} 
+	else if ( exts_length > 3 ) 
+	{ 
+		printf("sfs_fopen: file extension too long\n");
+		return -1;
+	}
+
+
+	int file_index	= -1;
+
+	// CHECK THAT FILE 'name' EXISTS - START //////////////////////////////////////////
+
+	// 									 | ////// READ INODE TABLE FROM DISC - START //////
+	// May not be in scope of Assignment | flush_in_table_from_disc(); 
+	// 									 | ////// READ INODE TABLE FROM DISC - END ////////
+
+	////// READ rootDir FROM DISC - START //////
+	//flush_rootDir_from_disc();
+	////// READ rootDir FROM DISC - END ////////
+
+	////// SEARCH FOR FILE 'name' IN DIRECTORY - START ////
+	for ( int i = 0; i < NO_OF_INODES; i++ ) 
+	{
+		if ( strcmp( rootDir[ i ].name, name ) == 0 )
+		{
+			file_index = i;
+		}
+	}
+	////// SEARCH FOR FILE 'name' IN DIRECTORY - END   ////
+
+	// CHECK THAT FILE 'name' EXISTS - END ////////////////////////////////////////////
+
+	// IF FILE DOESNT EXIST - START //////////////////////////////////////////
+	if ( file_index < 0 )
+	{
+		////// SEARCH FOR OPEN INODE - START ///
+		int inode_index	= 0*0;
+		int inode_found = 0; 
+		while ( inode_found == 0 && inode_index < NO_OF_INODES - 1 )
+		{
+			inode_index++; //inc before checking to skip rootDir
+			inode_found = ( in_table[ inode_index ].size == -1 );
+		}
+		////// SEARCH FOR OPEN INODE - END /////
+
+		if ( inode_found == 0 )
+		{
+			printf("MAX INODES IN USE\n");
+			return -1;
+		}
+		else 
+		{
+			////// SEARCH FOR OPEN DIR ENTRY - START ///
+			int dir_index	= 1;
+			int dir_found 	= 0; 
+			while ( dir_found == 0 && dir_index < NO_OF_INODES )
+			{
+				dir_found = ( rootDir[ dir_index ].num == -1 );
+				dir_index++; 
+			} 
+			dir_index--; //undo last inc
+			////// SEARCH FOR OPEN DIR ENTRY - END /////
+
+			if ( dir_found == 0 )
+			{
+				printf( "MAX DIR ENTRIES IN USE - unexpected error\n" );
+				return -1;
+			} 
+			else 
+			{
+				// CREATE FILE - START ///////////////////////
+				in_table[ inode_index ].size 				= 0; //size changed from -1 to indicate this inode is used
+				rootDir[ dir_index ].num 					= inode_index;
+				rootDir[ dir_index ].beenGetted 			= 0;
+
+
+				strcpy( rootDir[ dir_index ].name, name );
+
 				file_index = dir_index;
 				// CREATE FILE - END /////////////////////////
 			}

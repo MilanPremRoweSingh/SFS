@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define MAX_FILE_NAME 21 //20 + 1 for '\0'
+#define MAXFILENAME 20 //20 + 1 for '\0'
 #define MAX_EXTENSION_NAME 3
 
 typedef struct superblock_t{  
@@ -38,7 +38,7 @@ typedef struct file_descriptor {
 
 typedef struct directory_entry{
     int num; // represents the inode number of the entery. 
-    char name[MAX_FILE_NAME]; // represents the name of the entery.
+    char name[MAXFILENAME]; // represents the name of the entery.
     int beenGetted; //tracks whether a file has been outputted by sfs_nextfilename 
 }directory_entry;
 
