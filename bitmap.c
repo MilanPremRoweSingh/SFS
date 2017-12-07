@@ -71,6 +71,11 @@ uint32_t get_index() {
 
 void rm_index(uint32_t index) {
 
+	if ( index > 1023 )
+	{
+		printf("Attempt to free out of bounds")
+		return -1;
+	}
     // get index in array of which bit to free
     uint32_t i = index / 8;
 
