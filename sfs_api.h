@@ -6,7 +6,7 @@
 #define MAX_FILE_NAME 21 //20 + 1 for '\0'
 #define MAX_EXTENSION_NAME 3
 
-typedef struct superblock_t{
+typedef struct superblock_t{  
     uint64_t magic;
     uint64_t block_size;
     uint64_t fs_size;

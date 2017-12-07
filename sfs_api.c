@@ -8,6 +8,7 @@
 #include <strings.h>
 #include "disk_emu.h"
 #include <math.h>
+#include <time.h>
 #define LASTNAME_FIRSTNAME_DISK "sfs_disk.disk"
 
 #ifndef NUM_BLOCKS
@@ -23,10 +24,10 @@ int const superB_size_bytes		= sizeof( superblock_t ); // Find out size of super
 int const superB_size_blocks	= ( int )ceil( (double)sizeof( superblock_t ) / (double)BLOCK_SIZE );
 
 int const rootDir_size_bytes	= sizeof( directory_entry ) * NO_OF_INODES ; // Find out size of superBlock
-int const rootDir_size_blocks	= ( int )ceil( (double)sizeof( directory_entry ) / (double)BLOCK_SIZE );
+int const rootDir_size_blocks	= ( int )ceil( (double)sizeof( directory_entry ) * NO_OF_INODES / (double)BLOCK_SIZE );
 
 int const inodeTab_size_bytes	= sizeof( inode_t ) * NO_OF_INODES ; // Find out size of superBlock
-int const inodeTab_size_blocks	= ( int )ceil( (double)sizeof( inode_t ) / (double)BLOCK_SIZE );
+int const inodeTab_size_blocks	= ( int )ceil( (double)sizeof( inode_t )*NO_OF_INODES / (double)BLOCK_SIZE );
 
 int currDirectory = 1; //Start at 1 because root is 0
 //tables
@@ -65,11 +66,11 @@ void read_bytes_in_blocks_contiguous( int currAddress, int num_bytes, void* data
 	free( read_buffer );
 }
 
-void flush_in_table_from_disc()
-{
-	int const address = superB_size_blocks;
-	read_bytes_in_blocks_contiguous( address, inodeTab_size_bytes, ( void* )in_table);
-}
+//void flush_in_table_from_disc()
+//{
+//	int const address = superB_size_blocks;
+//	read_bytes_in_blocks_contiguous( address, inodeTab_size_bytes, ( void* )in_table);
+//}
 
 void flush_rootDir_from_disc() 
 // Assumes in_table is up to date
@@ -83,7 +84,7 @@ void flush_rootDir_from_disc()
 		return;
 	}
 
-	for ( int i = 0; i < rootDir_size_blocks - 1; i++ ) //read full blocks
+	for ( int i = 0; i < rootDir_size_blocks; i++ ) //read full blocks
 	{
 		read_bytes_in_blocks_contiguous( in_table[0].data_ptrs[ i ], BLOCK_SIZE, ( ( ( void* ) rootDir ) + BLOCK_SIZE*i )  );
 	}	
@@ -117,16 +118,13 @@ void flush_rootDir_to_disc()
 int getBlockIndex( int inode_index, int block_num )
 {
 	inode_t curr_inode = in_table[ inode_index ];
-
-	int block_total = (int)ceil( (float)curr_inode.size / (float)BLOCK_SIZE ); 
-
 	if ( block_num < 12 )
 	{
 		return curr_inode.data_ptrs[ block_num ];
 	}
 	else 
 	{
-		int	indBuffer[ (int)ceil( (float)BLOCK_SIZE / (float)sizeof( int )) ];
+		int	indBuffer[ BLOCK_SIZE / 4 ];
 		read_blocks( curr_inode.indirectPointer, 1, indBuffer );
 		return indBuffer[ block_num - 12 ];
 	}
@@ -136,7 +134,9 @@ void init_fdt()
 {
 	for( int i = 0; i < NO_OF_INODES; i++ )
 	{
-		fd_table[i].inodeIndex = -1;
+		fd_table[i].inodeIndex 	= -1;
+		fd_table[i].inode 		= NULL;
+		fd_table[i].rwptr 		= -1;
 	}
 }
 
@@ -174,6 +174,7 @@ void init_root()
 	{
 		rootDir[ i ].num  		= -1;
 		rootDir[ i ].name[ 0 ] 	= '\0';
+		rootDir[ i ].beenGetted	= 0;
 	}
 }
 
@@ -235,7 +236,7 @@ void mksfs(int fresh)
 
 		for ( int i = 0; i < inodeTab_size_blocks; i++ )
 		{
-			get_index();
+			int test = get_index();
 		}
 
 		// WRITE+OCCUPY INODE TABLE BLOCKS - END ///////////////////////////////////////////////////////
@@ -359,7 +360,7 @@ int sfs_fopen(char *name)
 	if ( file_index < 0 )
 	{
 		////// SEARCH FOR OPEN INODE - START ///
-		int inode_index	= 0;
+		int inode_index	= 0*0;
 		int inode_found = 0; 
 		while ( inode_found == 0 && inode_index < NO_OF_INODES - 1 )
 		{
@@ -382,7 +383,7 @@ int sfs_fopen(char *name)
 			{
 				dir_found = ( rootDir[ dir_index ].num == -1 );
 				dir_index++; 
-			}
+			} 
 			dir_index--; //undo last inc
 			////// SEARCH FOR OPEN DIR ENTRY - END /////
 
@@ -390,7 +391,7 @@ int sfs_fopen(char *name)
 			{
 				printf( "MAX DIR ENTRIES IN USE - unexpected error\n" );
 				return -1;
-			}
+			} 
 			else 
 			{
 				// CREATE FILE - START ///////////////////////
@@ -465,7 +466,7 @@ int sfs_fclose(int fileID)
 	}
 
 }
-int sfs_fread(int fileID, char *buf, int length) 
+int sfs_fread_old(int fileID, char *buf, int length) 
 {
 	int const inode_index 	= fd_table[ fileID ].inodeIndex;
 
@@ -520,9 +521,9 @@ int sfs_fread(int fileID, char *buf, int length)
 	return length;
 
 }
-int max( int num1, int num2 )
+int max( int num1, int num2 ) 
 {
-	return ( num1 > num2 ) ? num1 : num2; 
+	return ( num1 > num2 ) ? num1 : num2 ; 
 }
 
 int alloc_new_blocks ( int in_idx, int new_blocks )
@@ -533,25 +534,25 @@ int alloc_new_blocks ( int in_idx, int new_blocks )
 	} 
 	else if ( new_blocks < 0 )
 	{
-		printf("Nonpositive new_blocks");
+		printf("Nonpositive new_blocks.\n");
 		return -1;
 	}
 	inode_t intemp = in_table[ in_idx ];
 
 	int const max_blocks 	= ( 12 + ( BLOCK_SIZE / 4 ) ); 											// #data_ptrs + BLOCK_SIZE/sizeof(int)
-	int const size_block	= (int)ceil( (float)intemp.size / (float)BLOCK_SIZE );				 	//Position of the end of the size's block in bytes
+	int const size_block	= (int)ceil( (float)intemp.size / (float)BLOCK_SIZE );				 	//Position of the end of the size's block 
 	int first_block 		= size_block;
 	int last_block 			= size_block + new_blocks;
 
-	int blocks_allocated = 0;
+	int blocks_allocated = 0; 
 
-	if ( size_block + new_blocks > max_blocks )
+	if ( size_block + new_blocks >= max_blocks )
 	{
 		printf( "Trying to allocate too many blocks.\n" );
 		return -1;
 	}
 
-	if ( size_block < 12 && last_block > 12 ) // Need to create index block
+	if ( size_block < 12 && last_block >= 12 ) // Need to create index block
 	{
 		int new_idx = get_index();
 		if ( new_idx == -1 )
@@ -605,9 +606,80 @@ int alloc_new_blocks ( int in_idx, int new_blocks )
 
 	in_table[ in_idx ] = intemp;
 	free(new_indices);
+	write_bytes_to_blocks_contiguous( NUM_BLOCKS - 1, 128, ( void* )get_fbm_ptr() );
 	return blocks_allocated;
 }
 
+int sfs_fread(int fileID, char *buf, int length) 
+{
+	int in_idx 	= fd_table[ fileID ].inodeIndex; 
+	int rwptr 	= fd_table[ fileID ].rwptr;
+	int loc_size 	= in_table[ in_idx ].size;
+	int cplen;
+
+	if ( rwptr >= loc_size )
+	{
+		printf("rwptr >= loc_size\n");
+		return -1;
+	}
+
+	while ( rwptr + length > loc_size )
+	{
+		length--;
+	}
+
+	if ( length < 0 )
+	{		
+		printf("nonpositive length\n");
+		return -1;
+	}
+
+	if ( in_idx < 1 ) //Cannot write to root
+	{
+		return -1; //Invalid fd
+	}
+	
+	inode_t intemp = in_table[ in_idx ];
+
+	int rwptr_block				= (int)ceil( (float)rwptr / (float)BLOCK_SIZE ) * BLOCK_SIZE; 	//Position of the end of the rwptr's block in bytes
+	int len_from_rwptr_block	= length - ( rwptr_block - rwptr );								//Length from the end of the rwptr's block
+	int size_block 				= (int)ceil( (float)intemp.size / (float)BLOCK_SIZE ) * BLOCK_SIZE; 	//Position of the end of the size's block in bytes
+
+	int size_inc 				= max( 0, rwptr - intemp.size + length );						//Total Size increase
+	int size_inc_from_block		= max( 0, rwptr_block - size_block + len_from_rwptr_block );	//Relevant size increase
+	int num_new_blocks			= (int)ceil( (float)size_inc_from_block / (float)BLOCK_SIZE );			//Number of new blocks
+
+	int const last_block = ( size_block / BLOCK_SIZE ) + num_new_blocks;
+	int const rwptr_block_ind = rwptr / BLOCK_SIZE;
+	int loc_len = length;
+
+	// Read from first block
+	char temp_buf[BLOCK_SIZE];
+	int block_idx = getBlockIndex( in_idx, rwptr_block_ind );
+	int byte_idx = rwptr % BLOCK_SIZE;
+
+	read_blocks( block_idx, 1, temp_buf );
+	cplen = ( loc_len > BLOCK_SIZE - byte_idx ) ? BLOCK_SIZE - byte_idx : loc_len;
+	memcpy( buf, temp_buf + byte_idx, cplen);
+
+	char* loc_buf = buf + cplen;
+	loc_len -= cplen;
+
+	for ( int i = rwptr_block_ind+1; i <= last_block && loc_len > 0; i++ )
+	{
+		block_idx = getBlockIndex( in_idx, i );
+		read_blocks( block_idx, 1, temp_buf );
+		cplen = ( loc_len > BLOCK_SIZE ) ? BLOCK_SIZE : loc_len;
+		memcpy( loc_buf, temp_buf, cplen);
+		loc_buf += cplen;
+		loc_len -= cplen;
+	}
+
+	in_table[ fd_table[ fileID ].inodeIndex ].size 	+= size_inc;
+	fd_table[ fileID ].rwptr 						+= length;
+	flush_in_table_to_disc();
+	return length;
+}
 int sfs_fwrite( int fileID, const char* buf, int length )
 {
 	int const in_idx 	= fd_table[ fileID ].inodeIndex;
@@ -628,15 +700,47 @@ int sfs_fwrite( int fileID, const char* buf, int length )
 	int size_inc_from_block		= max( 0, rwptr_block - size_block + len_from_rwptr_block );	//Relevant size increase
 	int num_new_blocks			= (int)ceil( (float)size_inc_from_block / (float)BLOCK_SIZE );			//Number of new blocks
 
-	printf("Number of new_blocks of write of %d bytes from rwptr %d: %d \n", length, rwptr, num_new_blocks);
+	//printf("Number of new_blocks of write of %d bytes from rwptr %d: %d \n", length, rwptr, num_new_blocks);
 
 	if ( alloc_new_blocks( in_idx, num_new_blocks ) == -1 )
 	{
 		return -1;
 	}
 
+	int const last_block = ( size_block / BLOCK_SIZE ) + num_new_blocks;
+	int const rwptr_block_ind = rwptr / BLOCK_SIZE;
+	int loc_len = length;
+
+	// Read from first block
+	char temp_buf[BLOCK_SIZE];
+	int block_idx = getBlockIndex( in_idx, rwptr_block_ind );
+	int byte_idx = rwptr % BLOCK_SIZE;
+	read_blocks( block_idx, 1, temp_buf );
+
+	int cplen = ( loc_len > BLOCK_SIZE - byte_idx ) ? BLOCK_SIZE - byte_idx : loc_len;
+	memcpy( temp_buf + byte_idx, buf, cplen);
+	write_blocks( block_idx, 1, temp_buf );
+
+	char* loc_buf = buf + BLOCK_SIZE - byte_idx;
+	loc_len -= cplen;
+
+	for ( int i = rwptr_block_ind+1; i <= last_block && loc_len > 0; i++ )
+	{
+		cplen = ( loc_len > BLOCK_SIZE ) ? BLOCK_SIZE : loc_len;
+		block_idx = getBlockIndex( in_idx, i );
+		read_blocks( block_idx, 1, temp_buf );
+		memcpy( temp_buf , loc_buf, cplen);
+		write_blocks( block_idx, 1, temp_buf );
+		loc_buf += cplen;
+		loc_len -= cplen;
+	}
+
 	in_table[ fd_table[ fileID ].inodeIndex ].size 	+= size_inc;
 	fd_table[ fileID ].rwptr 						+= length;
+	flush_in_table_to_disc();
+
+	
+	return length;
 }
 
 int sfs_fwrite_old( int fileID, const char* buf, int length )
@@ -994,79 +1098,155 @@ void test_print_block_indices( int in_idx, int num_blocks )
 	printf("\n");
 }
 
+int test_read_after_write( int fd, char* ori_buff, int write_size )
+{
+	char* buff = (char*)malloc( write_size );
+	fd_table[ fd ].rwptr = fd_table[ fd ].rwptr - write_size;
+	int check = 0;
+
+	sfs_fread( fd, buff, write_size );
+	for ( int i = 0; i < write_size; i++ )
+	{
+		if ( ori_buff[ i ] != buff[ i ] )
+		{
+			check++;
+		} 
+	}
+ 	if ( check != 0 ) 
+ 	{
+ 		printf( "%d W/R error in file %d, after r/w %d bytes \n\n", check, fd, write_size );
+ 	}
+ 	else
+ 	{
+ 		printf( "NO W/R error in file %d, after r/w %d bytes \n\n", fd, write_size );
+ 	}
+ 	
+ 	free(buff);
+ 	return check;
+
+}
+
+void set_buffer( char* buff, int size, int value )
+{
+	for ( int i = 0; i < 24 * 1024 ; i++ )
+	{
+		buff[i] = ( char )value;//(i % 256);
+	} 
+}
+
 void sfs_test_milan()
 {
+	srand(time(NULL));
 	mksfs(1); 
 	int file1 = sfs_fopen("File1.txt");
 
-	char buff[ 24 * 1024 ];
-	for ( int i = 0; i < 24 * 1024 ; i++ )
-	{
-		buff[i] = ( char )255;
-	} 
-
+	char buff[24*1024];
 	int num_blocks = 0;
+	char read_buff[BLOCK_SIZE*24];
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 512 );
 	num_blocks += 1;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 512 );
 
+
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 256 );
 	num_blocks += 0;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 256 );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 256 );
 	num_blocks += 0;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 256 );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 1024 );
 	num_blocks += 1;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 1024 );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 1024*12 );
 	num_blocks += 12;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 1024*12 );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
+	sfs_fwrite( file1, buff, 1024*12 );
+	num_blocks += 12;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 512 );
+
+	set_buffer( buff, 24*1024, rand() % 256 );
+	sfs_fwrite( file1, buff, 1024*12 );
+	num_blocks += 12;
+	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 1024 );
+
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fseek( file1, 0 );
 	printf("Seek file %d to loc %d\n", file1, 0 );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 512 );
 	num_blocks += 0;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 512 );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 256 );
 	num_blocks += 0;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 256 );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 256 );
 	num_blocks += 0;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 256 );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 1024 );
 	num_blocks += 0;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 1024 );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 1024*11.5f );
 	num_blocks += 0;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 1024*11.5f );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 1024 );
 	num_blocks += 1;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 1024 );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 1024 );
 	num_blocks += 1;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 1024 );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 1024 );
 	num_blocks += 1;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 1024 );
 
+	set_buffer( buff, 24*1024, rand() % 256 );
 	sfs_fwrite( file1, buff, 1024 );
 	num_blocks += 1;
 	test_print_block_indices( fd_table[ file1 ].inodeIndex, num_blocks );
+	test_read_after_write( file1, buff, 1024 );
 
-
+	sfs_fseek( file1, 0 );
+	
 /*
 	int idxBlock[1024/4];
 	read_blocks( ( *fd_table[ file1 ].inode ).indirectPointer, 1, idxBlock );

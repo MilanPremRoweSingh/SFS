@@ -48,7 +48,7 @@ uint32_t get_index() {
     	 i++; 
     }
 
-    if ( i == 128 )
+    if ( i >= 128 )
     {
     	return -1;
     }
