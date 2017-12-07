@@ -4,8 +4,8 @@ LDFLAGS = `pkg-config fuse --cflags --libs` -lm
 
 # Uncomment on of the following three lines to compile
 #SOURCES= disk_emu.c bitmap.c sfs_api.c sfs_test.c sfs_api.h
-SOURCES= disk_emu.c bitmap.c sfs_api.c sfs_test2.c sfs_api.h
-#SOURCES= disk_emu.c bitmap.c sfs_api.c fuse_wrappers.c sfs_api.h
+#SOURCES= disk_emu.c bitmap.c sfs_api.c sfs_test2.c sfs_api.h
+SOURCES= disk_emu.c bitmap.c sfs_api.c fuse_wrappers.c sfs_api.h
 
 #if you wish to create your own test - you can do it using this
 #SOURCES= disk_emu.c bitmap.c sfs_api.c sfs_mytest.c sfs_api.h
